@@ -11,6 +11,18 @@ const AI = new OpenAI({
     baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/"
 });
 
+// Labels which step actually failed (Gemini vs. the database vs. Clerk)
+// rather than a bare error.message from whichever threw — "400 status code
+// (no body)" alone, for instance, is the OpenAI SDK's generic error text and
+// reads identically whether it came from an expired key, a retired model, or
+// a rate limit, so it was impossible to tell apart from the client toast.
+class LabeledError extends Error {
+    constructor(label, cause) {
+        super(`${label}: ${cause.message}`)
+        this.cause = cause
+    }
+}
+
 export const generateArticle = async (req, res)=>{
     try {
         const { userId } = req.auth();
@@ -32,19 +44,20 @@ export const generateArticle = async (req, res)=>{
             ],
             temperature: 0.7,
             max_tokens: length,
-        });
+        }).catch(error => { throw new LabeledError("AI generation failed", error) });
 
         const content = response.choices[0].message.content
 
-        await sql` INSERT INTO creations (user_id, prompt, content, type) 
-        VALUES (${userId}, ${prompt}, ${content}, 'article')`;
+        await sql` INSERT INTO creations (user_id, prompt, content, type)
+        VALUES (${userId}, ${prompt}, ${content}, 'article')`
+            .catch(error => { throw new LabeledError("Saving the article failed", error) });
 
         if(plan !== 'premium'){
             await clerkClient.users.updateUserMetadata(userId, {
                 privateMetadata:{
                     free_usage: free_usage + 1
                 }
-            })
+            }).catch(error => { throw new LabeledError("Updating usage count failed", error) });
         }
 
         res.json({ success: true, content})
@@ -73,19 +86,20 @@ export const generateBlogTitle = async (req, res)=>{
             messages: [{ role: "user", content: prompt, } ],
             temperature: 0.7,
             max_tokens: 100,
-        });
+        }).catch(error => { throw new LabeledError("AI generation failed", error) });
 
         const content = response.choices[0].message.content
 
-        await sql` INSERT INTO creations (user_id, prompt, content, type) 
-        VALUES (${userId}, ${prompt}, ${content}, 'blog-title')`;
+        await sql` INSERT INTO creations (user_id, prompt, content, type)
+        VALUES (${userId}, ${prompt}, ${content}, 'blog-title')`
+            .catch(error => { throw new LabeledError("Saving the blog title failed", error) });
 
         if(plan !== 'premium'){
             await clerkClient.users.updateUserMetadata(userId, {
                 privateMetadata:{
                     free_usage: free_usage + 1
                 }
-            })
+            }).catch(error => { throw new LabeledError("Updating usage count failed", error) });
         }
 
         res.json({ success: true, content})
@@ -216,12 +230,13 @@ export const resumeReview = async (req, res)=>{
             messages: [{ role: "user", content: prompt, } ],
             temperature: 0.7,
             max_tokens: 1000,
-        });
+        }).catch(error => { throw new LabeledError("AI generation failed", error) });
 
         const content = response.choices[0].message.content
 
-        await sql` INSERT INTO creations (user_id, prompt, content, type) 
-        VALUES (${userId}, 'Review the uploaded resume', ${content}, 'resume-review')`;
+        await sql` INSERT INTO creations (user_id, prompt, content, type)
+        VALUES (${userId}, 'Review the uploaded resume', ${content}, 'resume-review')`
+            .catch(error => { throw new LabeledError("Saving the review failed", error) });
 
         res.json({ success: true, content})
 
