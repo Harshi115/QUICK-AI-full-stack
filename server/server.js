@@ -26,3 +26,9 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, ()=>{
     console.log('Server is running on port', PORT);
 })
+
+// Vercel's @vercel/node builder needs this to treat the Express app as the
+// request handler for the serverless function — without it, every request
+// to a deployed route fails (this app.listen() above only matters for local
+// `npm run server`/`npm start`, not on Vercel).
+export default app
